@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Orbital System Ultra Pro 2.0</title>
+<style>
+html, body { margin:0; padding:0; background:black; overflow:hidden; }
+canvas{ display:block; }
+</style>
+</head>
+<body>
+
+<script type="module">
+import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js';
+import { EffectComposer } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/EffectComposer.js';
+import { RenderPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/postprocessing/UnrealBloomPass.js';
+
+/* ----------------- RENDERER ----------------- */
+const renderer = new THREE.WebGLRenderer({ antialias:true, powerPreference: "high-performance" });
+renderer.setSize(innerWidth,innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.25;
+document.body.appendChild(renderer.domElement);
+
+/* ----------------- SCENE + CAMERA ----------------- */
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x030305,0.055);
+scene.userData.baseFogDensity = scene.fog.density;
+
+const camera = new THREE.PerspectiveCamera(60,innerWidth/innerHeight,0.1,300);
+camera.position.set(0,7,20);
+
+/* ----------------- STARFIELD ----------------- */
+const starsGeo = new THREE.BufferGeometry();
+const starsCount = 3500;
+const starPos = new Float32Array(starsCount*3);
+for(let i=0;i<starsCount*3;i++){starPos[i]=(Math.random()-0.5)*500;}
+starsGeo.setAttribute('position',new THREE.BufferAttribute(starPos,3));
+scene.add(new THREE.Points(starsGeo,new THREE.PointsMaterial({color:0xffffff,size:0.25,transparent:true,opacity:0.75})));
+
+/* ----------------- DIRECTIONAL LIGHT + AMBIENT ----------------- */
+const sunLight = new THREE.DirectionalLight(0xffffff,2.6);
+sunLight.position.set(15,20,10);
+sunLight.castShadow=true;
+sunLight.shadow.mapSize.set(2048,2048);
+sunLight.shadow.camera.near=1; sunLight.shadow.camera.far=100;
+scene.add(sunLight);
+scene.add(new THREE.AmbientLight(0x202030,0.25));
+
+/* ----------------- GOD RAYS + LENS FLARE ----------------- */
+const rayGeo = new THREE.ConeGeometry(7,30,48,1,true);
+const rayMat = new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.07,depthWrite:false,side:THREE.DoubleSide});
+const godRays = new THREE.Mesh(rayGeo,rayMat);
+godRays.position.copy(sunLight.position);
+godRays.rotation.x=Math.PI;
+scene.add(godRays);
+
+const flare = new THREE.Mesh(new THREE.SphereGeometry(0.8,32,32),new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.15}));
+flare.position.copy(sunLight.position);
+scene.add(flare);
+
+/* ----------------- CENTRAL ASTEROID (GLOW DYNAMIC) ----------------- */
+const asteroidGeo = new THREE.IcosahedronGeometry(4,4);
+const p = asteroidGeo.attributes.position;
+for(let i=0;i<p.count;i++){const v=new THREE.Vector3().fromBufferAttribute(p,i);v.multiplyScalar(1+Math.random()*0.25);p.setXYZ(i,v.x,v.y,v.z);}
+const asteroid = new THREE.Mesh(asteroidGeo,new THREE.MeshStandardMaterial({color:0x555555,roughness:0.92,metalness:0.08,emissive:0x002244,emissiveIntensity:0.1}));
+asteroid.castShadow=true; asteroid.receiveShadow=true;
+scene.add(asteroid);
+
+/* ----------------- ATMOSPHERE ----------------- */
+const atm = new THREE.Mesh(new THREE.SphereGeometry(4.25,64,64),new THREE.MeshBasicMaterial({color:0x445577,transparent:true,opacity:0.065,side:THREE.BackSide,depthWrite:false}));
+scene.add(atm);
+
+/* ----------------- MOONS ----------------- */
+const moons=[];
+for(let i=0;i<2;i++){
+  const moon=new THREE.Mesh(new THREE.SphereGeometry(0.9+i*0.25,32,32),new THREE.MeshStandardMaterial({color:0x888888}));
+  moon.castShadow=true; moon.receiveShadow=true;
+  scene.add(moon);
+  moons.push({mesh:moon,radius:6+i*2,angle:Math.random()*Math.PI*2,speed:0.002+i*0.001});
+}
+
+/* ----------------- ASTEROID BELT + GLOW SPARKS ----------------- */
+const belt=[]; 
+const beltGeo=new THREE.IcosahedronGeometry(0.18,0);
+const beltMat=new THREE.MeshStandardMaterial({color:0x666666,emissive:0x00ffff,emissiveIntensity:0.18});
+for(let i=0;i<500;i++){
+  const rock=new THREE.Mesh(beltGeo,beltMat);
+  const r=9+Math.random()*6,a=Math.random()*Math.PI*2,tilt=(Math.random()-.5)*0.6;
+  rock.position.set(Math.cos(a)*r,tilt,Math.sin(a)*r);
+  rock.rotation.set(Math.random()*Math.PI,Math.random()*Math.PI,Math.random()*Math.PI);
+  rock.castShadow=true; scene.add(rock);
+  belt.push({mesh:rock,radius:r,angle:a,speed:.0005+Math.random()*.001});
+}
+
+/* Belt sparkle particles */
+const beltSparksGeo = new THREE.BufferGeometry();
+const beltSparksCount = 400;
+const beltSparksPos = new Float32Array(beltSparksCount*3);
+for(let i=0;i<beltSparksCount*3;i++){beltSparksPos[i]=(Math.random()-0.5)*30;}
+beltSparksGeo.setAttribute('position',new THREE.BufferAttribute(beltSparksPos,3));
+scene.add(new THREE.Points(beltSparksGeo,new THREE.PointsMaterial({color:0x00ffff,size:0.08,transparent:true,opacity:0.7})));
+
+/* ----------------- DUST PARTICLES ----------------- */
+const dustGeo = new THREE.BufferGeometry();
+const dustCount = 800;
+const dustPos = new Float32Array(dustCount*3);
+for(let i=0;i<dustCount*3;i++){dustPos[i]=(Math.random()-0.5)*60;}
+dustGeo.setAttribute('position',new THREE.BufferAttribute(dustPos,3));
+scene.add(new THREE.Points(dustGeo,new THREE.PointsMaterial({color:0x77ffff,size:0.05,transparent:true,opacity:0.5})));
+
+/* ----------------- POSTPROCESSING ----------------- */
+const composer=new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene,camera));
+composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight),1.2,0.5,0.25));
+
+/* ----------------- ECLIPSE FACTOR ----------------- */
+function eclipseFactor(){let f=1;moons.forEach(m=>{const l=sunLight.position.clone().normalize(),t=asteroid.position.clone().sub(m.mesh.position).normalize();const a=l.dot(t),dist=m.mesh.position.distanceTo(asteroid.position);if(a>.85&&dist<m.radius+1.5)f*=0.4;});return f;}
+
+/* ----------------- ANIMATION ----------------- */
+let drift=0,t=0;
+function animate(){requestAnimationFrame(animate);
+  drift+=.0003; t+=.02;
+  asteroid.rotation.y+=0.0008; asteroid.rotation.x+=0.0004;
+  atm.material.opacity=.065+Math.sin(t)*.02;
+  asteroid.material.emissiveIntensity=0.1+Math.sin(t*1.5)*0.05;
+
+  const e=eclipseFactor(); sunLight.intensity=2.8*e; godRays.material.opacity=.07*e; flare.material.opacity=0.15*e;
+  scene.fog.density=scene.userData.baseFogDensity*(1.6-.7*e);
+
+  moons.forEach(m=>{m.angle+=m.speed;m.mesh.position.set(Math.cos(m.angle)*m.radius,Math.sin(m.angle*.7)*.4,Math.sin(m.angle)*m.radius);});
+  belt.forEach(b=>{b.angle+=b.speed;b.mesh.position.x=Math.cos(b.angle)*b.radius;b.mesh.position.z=Math.sin(b.angle)*b.radius;b.mesh.position.y=Math.sin(b.angle*2)*.3;});
+  
+  camera.position.x=Math.sin(drift)*.55; camera.position.y=7+Math.sin(drift*.7)*.35;
+  composer.render();
+}
+animate();
+
+/* ----------------- RESIZE ----------------- */
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);composer.setSize(innerWidth,innerHeight);});
+
+</script>
+</body>
+</html>
